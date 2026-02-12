@@ -148,9 +148,42 @@ app.post("/join", async (req, res) => {
   }
 });
 
+app.post("/telegram-webhook", async (req, res) => {
+  try {
+    const body = req.body;
+
+    if (body.message && body.message.new_chat_members) {
+      for (const member of body.message.new_chat_members) {
+        await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            chat_id: CHAT_ID,
+            text: `🐶 Welcome to DIGDOG Early Access, ${member.first_name || "friend"}!
+
+You are officially part of the first 500.
+
+📌 Stay tuned for launch details.
+📌 Do not share invite links.
+📌 More announcements coming soon.
+
+We dig together. 🚀`
+          })
+        });
+      }
+    }
+
+    res.sendStatus(200);
+  } catch (e) {
+    console.error("Telegram webhook error:", e);
+    res.sendStatus(500);
+  }
+});
+
 app.listen(PORT, "0.0.0.0", () => {
   console.log(`Server running on port ${PORT}`);
 });
+
 
 
 
