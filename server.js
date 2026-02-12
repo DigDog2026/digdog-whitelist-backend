@@ -57,44 +57,60 @@ app.get("/spots", (req, res) => {
 
 // Main endpoint: verify wallet ownership + issue single-use TG invite
 app.post("/join", async (req, res) => {
-  console.log("=== /join HIT ===");
-  console.log("Body:", req.body);
-
   try {
-  const { wallet, signatureBase64, signatureBase58 } = req.body || {};
-  const signature = signatureBase64 || signatureBase58;
+    const { wallet, signatureBase64, signatureBase58 } = req.body || {};
+    const signature = signatureBase64 || signatureBase58; // accept either
 
-  if (!wallet || !signature) {
-  return res.status(400).json({ error: "Missing wallet or signature" });
-}
+    const message = "DIGDOG Early Access: verify wallet ownership";
 
-    // Validate wallet format
+    if (!wallet || !signature) {
+      return res.status(400).json({ error: "Missing wallet or signature" });
+    }
+
+    // Validate wallet
     try { new PublicKey(wallet); }
     catch { return res.status(400).json({ error: "Invalid wallet address" }); }
 
-    // Verify signature
+    // Verify signature (base64)
     const ok = verifySignature({ wallet, message, signatureBase64: signature });
     if (!ok) return res.status(401).json({ error: "Signature verification failed" });
 
-    // Enforce one-time per wallet
+    // Cap + duplicates
     if (exists(wallet)) return res.status(409).json({ error: "This wallet is already registered." });
 
-    // Enforce cap
     const current = getCount();
     if (current >= MAX_SPOTS) return res.status(403).json({ error: "Whitelist is full." });
 
-    // Insert wallet
+    // Insert
     insertWallet(wallet);
 
-    // Create single-use Telegram invite link
+    // Telegram invite
     const tgResp = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/createChatInviteLink`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        chat_id: CHAT_ID,
-        member_limit: 1
-      }),
+      body: JSON.stringify({ chat_id: CHAT_ID, member_limit: 1 }),
     });
+
+    const tgData = await tgResp.json();
+
+    if (!tgData.ok || !tgData.result?.invite_link) {
+      db.prepare("DELETE FROM whitelist WHERE wallet=?").run(wallet);
+      return res.status(500).json({
+        error: "Telegram invite creation failed",
+        telegram: tgData
+      });
+    }
+
+    return res.json({
+      invite_link: tgData.result.invite_link,
+      spots_remaining: MAX_SPOTS - (current + 1)
+    });
+
+  } catch (e) {
+    console.error("JOIN ERROR:", e);
+    return res.status(500).json({ error: "Server error", details: String(e) });
+  }
+});
 
     const tgData = await tgResp.json();
     console.log("Telegram status:", tgResp.status);
