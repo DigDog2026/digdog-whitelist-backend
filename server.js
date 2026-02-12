@@ -41,14 +41,10 @@ function exists(wallet) {
 function insertWallet(wallet) {
   db.prepare("INSERT INTO whitelist(wallet, created_at) VALUES(?, ?)").run(wallet, Date.now());
 }
-
-function verifySignature({ wallet, message, signatureBase58 }) {
+function verifySignature({ wallet, message, signatureBase64 }) {
   const pubkey = new PublicKey(wallet);
   const msgBytes = new TextEncoder().encode(message);
-
-  // signatureBase58 actually contains base64 from the browser
-  const sigBytes = Buffer.from(signatureBase58, "base64");
-
+  const sigBytes = Buffer.from(signatureBase64, "base64");
   return nacl.sign.detached.verify(msgBytes, sigBytes, pubkey.toBytes());
 }
 
@@ -65,19 +61,19 @@ app.post("/join", async (req, res) => {
   console.log("Body:", req.body);
 
   try {
-    const { wallet, signatureBase58 } = req.body || {};
-    const message = "DIGDOG Early Access: verify wallet ownership";
+  const { wallet, signatureBase64, signatureBase58 } = req.body || {};
+  const signature = signatureBase64 || signatureBase58;
 
-    if (!wallet || !signatureBase58) {
-      return res.status(400).json({ error: "Missing wallet or signature" });
-    }
+  if (!wallet || !signature) {
+  return res.status(400).json({ error: "Missing wallet or signature" });
+}
 
     // Validate wallet format
     try { new PublicKey(wallet); }
     catch { return res.status(400).json({ error: "Invalid wallet address" }); }
 
     // Verify signature
-    const ok = verifySignature({ wallet, message, signatureBase58 });
+    const ok = verifySignature({ wallet, message, signatureBase64: signature });
     if (!ok) return res.status(401).json({ error: "Signature verification failed" });
 
     // Enforce one-time per wallet
