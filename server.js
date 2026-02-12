@@ -1,15 +1,17 @@
 require("dotenv").config();
+
 const express = require("express");
 const fetch = require("node-fetch");
 const Database = require("better-sqlite3");
 const cors = require("cors");
 
 const nacl = require("tweetnacl");
-const bs58 = require("bs58");
 const { PublicKey } = require("@solana/web3.js");
 
 const app = express();
 app.use(express.json());
+
+// NOTE: For launch, open CORS is fine. Later, restrict to your Netlify + GoDaddy domains.
 app.use(cors());
 
 const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
@@ -18,7 +20,7 @@ const MAX_SPOTS = parseInt(process.env.MAX_SPOTS || "500", 10);
 const PORT = parseInt(process.env.PORT || "3000", 10);
 
 if (!BOT_TOKEN || !CHAT_ID) {
-  console.error("Missing TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID in .env");
+  console.error("Missing TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID in environment variables.");
   process.exit(1);
 }
 
@@ -41,7 +43,12 @@ function exists(wallet) {
 function insertWallet(wallet) {
   db.prepare("INSERT INTO whitelist(wallet, created_at) VALUES(?, ?)").run(wallet, Date.now());
 }
-function verifySignature({ wallet, message, signatureBase64 }) {
+
+function deleteWallet(wallet) {
+  db.prepare("DELETE FROM whitelist WHERE wallet=?").run(wallet);
+}
+
+function verifySignatureBase64({ wallet, message, signatureBase64 }) {
   const pubkey = new PublicKey(wallet);
   const msgBytes = new TextEncoder().encode(message);
   const sigBytes = Buffer.from(signatureBase64, "base64");
@@ -52,14 +59,16 @@ app.get("/", (req, res) => res.json({ ok: true }));
 
 app.get("/spots", (req, res) => {
   const count = getCount();
-  res.json({ max: MAX_SPOTS, used: count, remaining: MAX_SPOTS - count });
+  res.json({ max: MAX_SPOTS, used: count, remaining: Math.max(0, MAX_SPOTS - count) });
 });
 
 // Main endpoint: verify wallet ownership + issue single-use TG invite
 app.post("/join", async (req, res) => {
   try {
     const { wallet, signatureBase64, signatureBase58 } = req.body || {};
-    const signature = signatureBase64 || signatureBase58; // accept either
+
+    // We accept either field name, but we treat the value as BASE64 (from the browser).
+    const signature = signatureBase64 || signatureBase58;
 
     const message = "DIGDOG Early Access: verify wallet ownership";
 
@@ -67,78 +76,71 @@ app.post("/join", async (req, res) => {
       return res.status(400).json({ error: "Missing wallet or signature" });
     }
 
-    // Validate wallet
-    try { new PublicKey(wallet); }
-    catch { return res.status(400).json({ error: "Invalid wallet address" }); }
+    // Validate wallet format
+    try {
+      new PublicKey(wallet);
+    } catch {
+      return res.status(400).json({ error: "Invalid wallet address" });
+    }
 
     // Verify signature (base64)
-    const ok = verifySignature({ wallet, message, signatureBase64: signature });
-    if (!ok) return res.status(401).json({ error: "Signature verification failed" });
+    const ok = verifySignatureBase64({ wallet, message, signatureBase64: signature });
+    if (!ok) {
+      return res.status(401).json({ error: "Signature verification failed" });
+    }
 
-    // Cap + duplicates
-    if (exists(wallet)) return res.status(409).json({ error: "This wallet is already registered." });
+    // Duplicate + cap checks
+    if (exists(wallet)) {
+      return res.status(409).json({ error: "This wallet is already registered." });
+    }
 
     const current = getCount();
-    if (current >= MAX_SPOTS) return res.status(403).json({ error: "Whitelist is full." });
+    if (current >= MAX_SPOTS) {
+      return res.status(403).json({ error: "Whitelist is full." });
+    }
 
-    // Insert
+    // Insert first (then rollback if Telegram fails)
     insertWallet(wallet);
 
-    // Telegram invite
+    // Create single-use Telegram invite link
     const tgResp = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/createChatInviteLink`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ chat_id: CHAT_ID, member_limit: 1 }),
+      body: JSON.stringify({
+        chat_id: CHAT_ID,
+        member_limit: 1
+      }),
     });
 
     const tgData = await tgResp.json();
 
+    // Helpful logs for Render
+    console.log("Telegram status:", tgResp.status);
+    console.log("Telegram response:", tgData);
+
     if (!tgData.ok || !tgData.result?.invite_link) {
-      db.prepare("DELETE FROM whitelist WHERE wallet=?").run(wallet);
+      // rollback insert if TG fails
+      deleteWallet(wallet);
+
+      const msg = tgData?.description || "Unknown Telegram error";
       return res.status(500).json({
         error: "Telegram invite creation failed",
-        telegram: tgData
+        telegram_error: msg,
+        telegram: tgData,
       });
     }
 
     return res.json({
       invite_link: tgData.result.invite_link,
-      spots_remaining: MAX_SPOTS - (current + 1)
+      spots_remaining: MAX_SPOTS - (current + 1),
     });
-
   } catch (e) {
     console.error("JOIN ERROR:", e);
     return res.status(500).json({ error: "Server error", details: String(e) });
   }
 });
 
-    const tgData = await tgResp.json();
-    console.log("Telegram status:", tgResp.status);
-    console.log("Telegram response:", tgData);
-
-    if (!tgData.ok || !tgData.result?.invite_link) {
-  // rollback insert if TG fails
-  db.prepare("DELETE FROM whitelist WHERE wallet=?").run(wallet);
-
-  const msg = tgData?.description || "Unknown Telegram error";
-  return res.status(500).json({
-    error: "Telegram invite creation failed",
-    telegram_error: msg,
-    telegram: tgData
-  });
-}
-
-    return res.json({
-      invite_link: tgData.result.invite_link,
-      spots_remaining: MAX_SPOTS - (current + 1)
-    });
-
-  } catch (err) {
-    console.error(err);
-    return res.status(500).json({ error: "Server error" });
-  }
-});
-
 app.listen(PORT, "0.0.0.0", () => {
   console.log(`Server running on port ${PORT}`);
 });
+
