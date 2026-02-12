@@ -14,11 +14,13 @@ app.use(express.json());
 // NOTE: For launch, open CORS is fine. Later, restrict to your Netlify + GoDaddy domains.
 app.use(cors({
   origin: [
+    "https://majestic-wisp-c71f3f.netlify.app",
     "https://digdog.ca",
-    "https://majestic-wisp-c71f3f.netlify.app"
-  ]
+    "https://www.digdog.ca"
+  ],
+  methods: ["GET", "POST"],
+  allowedHeaders: ["Content-Type"]
 }));
-
 
 const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const CHAT_ID = process.env.TELEGRAM_CHAT_ID;
@@ -149,5 +151,6 @@ app.post("/join", async (req, res) => {
 app.listen(PORT, "0.0.0.0", () => {
   console.log(`Server running on port ${PORT}`);
 });
+
 
 
