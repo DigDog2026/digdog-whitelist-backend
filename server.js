@@ -161,16 +161,44 @@ app.post("/join", async (req, res) => {
 
 app.post("/telegram-webhook", async (req, res) => {
   try {
-    const body = req.body;
+    const update = req.body;
 
-    if (body.message && body.message.new_chat_members) {
-      for (const member of body.message.new_chat_members) {
-        await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
+    // Always ack fast so Telegram doesn't retry
+    res.sendStatus(200);
+
+    // Helpful debug: see what Telegram is actually sending
+    console.log("TG UPDATE:", JSON.stringify(update));
+
+    // Case A: message with new members
+    const newMembers =
+      update?.message?.new_chat_members ||
+      update?.message?.new_chat_participant ||
+      [];
+
+    // Case B: chat_member updates (common for join/leave)
+    // update.chat_member.new_chat_member.user
+    // update.my_chat_member.new_chat_member.user
+    const memberFromChatMember =
+      update?.chat_member?.new_chat_member?.user ||
+      update?.my_chat_member?.new_chat_member?.user ||
+      null;
+
+    const membersToWelcome = Array.isArray(newMembers) ? newMembers : [];
+    if (memberFromChatMember) membersToWelcome.push(memberFromChatMember);
+
+    if (membersToWelcome.length === 0) return;
+
+    for (const member of membersToWelcome) {
+      const first = member?.first_name || "friend";
+
+      const resp = await fetch(
+        `https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`,
+        {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             chat_id: CHAT_ID,
-            text: `🐶 Welcome to DIGDOG Early Access, ${member.first_name || "friend"}!
+            text: `🐶 Welcome to DIGDOG Early Access, ${first}!
 
 You are officially part of the first 500.
 
@@ -178,22 +206,24 @@ You are officially part of the first 500.
 📌 Do not share invite links.
 📌 More announcements coming soon.
 
-We dig together. 🚀`
-          })
-        });
-      }
-    }
+We dig together. 🚀`,
+          }),
+        }
+      );
 
-    res.sendStatus(200);
+      const data = await resp.json();
+      console.log("sendMessage status:", resp.status, "resp:", data);
+    }
   } catch (e) {
     console.error("Telegram webhook error:", e);
-    res.sendStatus(500);
+    // If we already responded 200 above, don't try to send again
   }
 });
 
 app.listen(PORT, "0.0.0.0", () => {
   console.log(`Server running on port ${PORT}`);
 });
+
 
 
 
