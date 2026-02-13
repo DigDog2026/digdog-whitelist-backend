@@ -12,24 +12,26 @@ const app = express();
 app.use(express.json());
 
 // NOTE: For launch, open CORS is fine. Later, restrict to your Netlify + GoDaddy domains.
-app.use(cors({
- const allowed = new Set([
+const allowed = new Set([
   "https://chic-meringue-a766a3.netlify.app",
   "https://majestic-wisp-c71f3f.netlify.app",
   "https://digdog.ca",
-  "www.digdog.ca",
+  "https://www.digdog.ca",
 ]);
 
-app.use(cors({
-  origin: (origin, cb) => {
-    // allow no-origin requests (curl, server-to-server)
-    if (!origin) return cb(null, true);
-    return allowed.has(origin) ? cb(null, true) : cb(new Error("CORS blocked"), false);
-  },
-  methods: ["GET", "POST", "OPTIONS"],
-  allowedHeaders: ["Content-Type"],
-}));
-
+app.use(
+  cors({
+    origin: (origin, cb) => {
+      // allow no-origin requests (curl, server-to-server)
+      if (!origin) return cb(null, true);
+      return allowed.has(origin)
+        ? cb(null, true)
+        : cb(new Error("CORS blocked"), false);
+    },
+    methods: ["GET", "POST", "OPTIONS"],
+    allowedHeaders: ["Content-Type"],
+  })
+);
 
 const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const CHAT_ID = process.env.TELEGRAM_CHAT_ID;
@@ -192,6 +194,7 @@ We dig together. 🚀`
 app.listen(PORT, "0.0.0.0", () => {
   console.log(`Server running on port ${PORT}`);
 });
+
 
 
 
