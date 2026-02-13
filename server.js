@@ -14,7 +14,7 @@ app.use(express.json());
 // NOTE: For launch, open CORS is fine. Later, restrict to your Netlify + GoDaddy domains.
 app.use(cors({
  const allowed = new Set([
-  "https://keen-squirrel-02bbf7.netlify.app",
+  "https://chic-meringue-a766a3.netlify.app",
   "https://majestic-wisp-c71f3f.netlify.app",
   "https://digdog.ca",
   "www.digdog.ca",
@@ -192,6 +192,7 @@ We dig together. 🚀`
 app.listen(PORT, "0.0.0.0", () => {
   console.log(`Server running on port ${PORT}`);
 });
+
 
 
 
