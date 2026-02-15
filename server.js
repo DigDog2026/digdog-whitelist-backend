@@ -27,8 +27,6 @@ if (!HCAPTCHA_SECRET) {
 // CORS (keep your allowed list)
 const allowed = new Set([
   "https://chic-meringue-a766a3.netlify.app",
-  "https://majestic-wisp-c71f3f.netlify.app",
-  "https://keen-squirrel-02bbf7.netlify.app",
   "https://digdog.ca",
   "https://www.digdog.ca",
 ]);
@@ -213,3 +211,4 @@ We dig together. 🚀`,
 app.listen(PORT, "0.0.0.0", () => {
   console.log(`Server running on port ${PORT}`);
 });
+
