@@ -11,6 +11,9 @@ const { PublicKey } = require("@solana/web3.js");
 const app = express();
 app.use(express.json());
 
+// ✅ hCaptcha secret (set this in Render env vars)
+const HCAPTCHA_SECRET = process.env.HCAPTCHA_SECRET;
+
 // NOTE: For launch, open CORS is fine. Later, restrict to your Netlify + GoDaddy domains.
 const allowed = new Set([
   "https://chic-meringue-a766a3.netlify.app",
@@ -41,6 +44,10 @@ const PORT = parseInt(process.env.PORT || "3000", 10);
 if (!BOT_TOKEN || !CHAT_ID) {
   console.error("Missing TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID in environment variables.");
   process.exit(1);
+}
+
+if (!HCAPTCHA_SECRET) {
+  console.warn("WARNING: HCAPTCHA_SECRET is not set. /join will reject until you add it in Render.");
 }
 
 const db = new Database("whitelist.sqlite");
@@ -74,6 +81,29 @@ function verifySignatureBase64({ wallet, message, signatureBase64 }) {
   return nacl.sign.detached.verify(msgBytes, sigBytes, pubkey.toBytes());
 }
 
+// ✅ Server-side hCaptcha verification
+async function verifyHCaptcha(token, remoteip) {
+  if (!HCAPTCHA_SECRET) return false;
+  if (!token) return false;
+
+  const params = new URLSearchParams();
+  params.append("secret", HCAPTCHA_SECRET);
+  params.append("response", token);
+  if (remoteip) params.append("remoteip", remoteip);
+
+  const resp = await fetch("https://hcaptcha.com/siteverify", {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: params.toString(),
+  });
+
+  const data = await resp.json().catch(() => ({}));
+  // Helpful for debugging on Render if needed:
+  console.log("hCaptcha verify:", { ok: data.success, errors: data["error-codes"] });
+
+  return !!data.success;
+}
+
 app.get("/", (req, res) => res.json({ ok: true }));
 
 app.get("/spots", (req, res) => {
@@ -84,7 +114,17 @@ app.get("/spots", (req, res) => {
 // Main endpoint: verify wallet ownership + issue single-use TG invite
 app.post("/join", async (req, res) => {
   try {
-    const { wallet, signatureBase64, signatureBase58 } = req.body || {};
+    const { wallet, signatureBase64, signatureBase58, captchaToken } = req.body || {};
+
+    // ✅ Require captcha
+    if (!captchaToken) {
+      return res.status(400).json({ error: "Missing human verification (captcha)." });
+    }
+
+    const humanOk = await verifyHCaptcha(captchaToken, req.ip);
+    if (!humanOk) {
+      return res.status(403).json({ error: "Human verification failed (captcha)." });
+    }
 
     // We accept either field name, but we treat the value as BASE64 (from the browser).
     const signature = signatureBase64 || signatureBase58;
@@ -127,7 +167,7 @@ app.post("/join", async (req, res) => {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         chat_id: CHAT_ID,
-        member_limit: 1
+        member_limit: 1,
       }),
     });
 
@@ -176,8 +216,6 @@ app.post("/telegram-webhook", async (req, res) => {
       [];
 
     // Case B: chat_member updates (common for join/leave)
-    // update.chat_member.new_chat_member.user
-    // update.my_chat_member.new_chat_member.user
     const memberFromChatMember =
       update?.chat_member?.new_chat_member?.user ||
       update?.my_chat_member?.new_chat_member?.user ||
@@ -223,8 +261,6 @@ We dig together. 🚀`,
 app.listen(PORT, "0.0.0.0", () => {
   console.log(`Server running on port ${PORT}`);
 });
-
-
 
 
 
